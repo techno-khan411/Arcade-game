@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cloud Run Arcade — Catch the Stars</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#151d35; --accent:#75e6da; --pink:#ff7eb6; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:20px;
+      font-family:system-ui,-apple-system,Segoe UI,sans-serif; color:#f4f7ff;
+      background:radial-gradient(circle at top,#202e55 0,var(--bg) 58%); }
+    main { width:min(760px,100%); }
+    h1 { margin:0 0 6px; font-size:clamp(1.8rem,5vw,2.7rem); }
+    .sub { color:#b8c5e5; margin:0 0 18px; }
+    .hud { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+    .stat { background:var(--panel); border:1px solid #2c3b61; padding:10px 14px; border-radius:12px; }
+    canvas { display:block; width:100%; background:#080d1b; border:1px solid #34456f; border-radius:16px; touch-action:none; }
+    .controls { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; align-items:center; }
+    button { border:0; border-radius:10px; padding:11px 16px; font:inherit; font-weight:700; cursor:pointer; }
+    #start { background:var(--accent); color:#071a22; }
+    #left,#right { background:#263554; color:white; }
+    .hint { color:#aebcdb; font-size:.92rem; margin-top:12px; line-height:1.5; }
+    button:focus-visible { outline:3px solid var(--pink); outline-offset:3px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>✨ Catch the Stars</h1>
+  <p class="sub">A tiny browser game, ready to deploy on Google Cloud Run.</p>
+  <div class="hud">
+    <div class="stat">Score: <strong id="score">0</strong></div>
+    <div class="stat">Lives: <strong id="lives">3</strong></div>
+    <div class="stat">Best: <strong id="best">0</strong></div>
+  </div>
+  <canvas id="game" width="720" height="420" aria-label="Catch the falling stars game"></canvas>
+  <div class="controls">
+    <button id="start">Start / Restart</button>
+    <button id="left" aria-label="Move left">◀ Left</button>
+    <button id="right" aria-label="Move right">Right ▶</button>
+  </div>
+  <p class="hint">Use ← and → or A and D to move the basket. Catch the falling stars to score points. Miss three stars and the game ends. On a phone, drag on the game area or use the buttons.</p>
+</main>
+<script>
+(() => {
+  const canvas = document.querySelector("#game"), ctx = canvas.getContext("2d");
+  const scoreEl = document.querySelector("#score"), livesEl = document.querySelector("#lives"), bestEl = document.querySelector("#best");
+  let score = 0, lives = 3, running = false, last = 0, spawnTimer = 0, stars = [];
+  let best = Number(localStorage.getItem("catchStarsBest") || 0);
+  bestEl.textContent = best;
+  const basket = { x: 310, y: 370, w: 100, h: 18, speed: 390 };
+  const keys = { left:false, right:false };
+  function reset() { score=0; lives=3; stars=[]; spawnTimer=0; basket.x=(canvas.width-basket.w)/2; scoreEl.textContent=score; livesEl.textContent=lives; running=true; last=0; requestAnimationFrame(loop); }
+  function starPath(x,y,r) { ctx.beginPath(); for(let i=0;i<10;i++){ const a=-Math.PI/2+i*Math.PI/5, rr=i%2===0?r:r*.45; const px=x+Math.cos(a)*rr, py=y+Math.sin(a)*rr; i?ctx.lineTo(px,py):ctx.moveTo(px,py); } ctx.closePath(); }
+  function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle="#080d1b"; ctx.fillRect(0,0,canvas.width,canvas.height);
+    for(let i=0;i<55;i++){ const x=(i*137)%canvas.width, y=(i*71)%canvas.height; ctx.fillStyle=i%3?"#34456f":"#75e6da"; ctx.fillRect(x,y,2,2); }
+    stars.forEach(s=>{ starPath(s.x,s.y,s.r); ctx.fillStyle="#ffd166"; ctx.shadowColor="#ffd166"; ctx.shadowBlur=12; ctx.fill(); ctx.shadowBlur=0; });
+    ctx.fillStyle="#75e6da"; ctx.fillRect(basket.x,basket.y,basket.w,basket.h);
+    ctx.fillStyle="#b8fff5"; ctx.fillRect(basket.x+10,basket.y-5,basket.w-20,5);
+    if(!running){ ctx.fillStyle="rgba(4,8,20,.72)"; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.textAlign="center"; ctx.fillStyle="#fff"; ctx.font="bold 32px system-ui"; ctx.fillText(score===0&&lives===3?"Ready to play?":"Game over!",canvas.width/2,190); ctx.font="18px system-ui"; ctx.fillStyle="#b8c5e5"; ctx.fillText("Press Start / Restart to play",canvas.width/2,225); }
+  }
+  function loop(time) {
+    if(!running){draw();return;}
+    const dt=Math.min((time-last)/1000||0,0.04); last=time;
+    if(keys.left) basket.x-=basket.speed*dt;
+    if(keys.right) basket.x+=basket.speed*dt;
+    basket.x=Math.max(0,Math.min(canvas.width-basket.w,basket.x));
+    spawnTimer+=dt;
+    if(spawnTimer>.7){ stars.push({x:18+Math.random()*(canvas.width-36),y:-12,r:9+Math.random()*5,speed:115+Math.random()*90+score*1.4}); spawnTimer=0; }
+    for(let i=stars.length-1;i>=0;i--){
+      const s=stars[i]; s.y+=s.speed*dt;
+      if(s.y+s.r>=basket.y && s.y-s.r<=basket.y+basket.h && s.x>=basket.x-4 && s.x<=basket.x+basket.w+4){
+        stars.splice(i,1); score+=10; scoreEl.textContent=score;
+        if(score>best){best=score;bestEl.textContent=best;localStorage.setItem("catchStarsBest",String(best));}
+      } else if(s.y-s.r>canvas.height){ stars.splice(i,1); lives--; livesEl.textContent=lives; if(lives<=0){running=false;} }
+    }
+    draw(); if(running) requestAnimationFrame(loop); else draw();
+  }
+  document.querySelector("#start").addEventListener("click",reset);
+  document.querySelector("#left").addEventListener("pointerdown",()=>keys.left=true);
+  document.querySelector("#right").addEventListener("pointerdown",()=>keys.right=true);
+  ["pointerup","pointerleave","pointercancel"].forEach(e=>{document.querySelector("#left").addEventListener(e,()=>keys.left=false);document.querySelector("#right").addEventListener(e,()=>keys.right=false);});
+  window.addEventListener("keydown",e=>{if(["ArrowLeft","a","A"].includes(e.key))keys.left=true;if(["ArrowRight","d","D"].includes(e.key))keys.right=true;});
+  window.addEventListener("keyup",e=>{if(["ArrowLeft","a","A"].includes(e.key))keys.left=false;if(["ArrowRight","d","D"].includes(e.key))keys.right=false;});
+  let dragging=false;
+  canvas.addEventListener("pointerdown",e=>{dragging=true;moveBasket(e);});
+  canvas.addEventListener("pointermove",e=>{if(dragging)moveBasket(e);});
+  window.addEventListener("pointerup",()=>dragging=false);
+  function moveBasket(e){const rect=canvas.getBoundingClientRect();const x=(e.clientX-rect.left)*canvas.width/rect.width;basket.x=Math.max(0,Math.min(canvas.width-basket.w,x-basket.w/2));}
+  draw();
+})();
+</script>
+</body>
+</html>
